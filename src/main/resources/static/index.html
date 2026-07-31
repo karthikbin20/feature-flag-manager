@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Flag Manager</title>
+    <style>
+        :root {
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --text: #333333;
+            --border: #eeeeee;
+            --danger: #ef4444;
+            --subtle-bg: rgba(0,0,0,0.02);
+            --cell-padding: 12px 16px;
+        }
+
+        /* Live Dark Theme Variables */
+        body.dark-theme {
+            --bg: #181825;
+            --card-bg: #1e1e2e;
+            --text: #cdd6f4;
+            --border: #313244;
+            --danger: #f87171;
+            --subtle-bg: #252538;
+        }
+
+        /* Live Compact Mode Variable */
+        body.compact-mode {
+            --cell-padding: 6px 16px;
+        }
+
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; display: flex; justify-content: center; transition: background 0.3s, color 0.3s; }
+        .container { max-width: 680px; width: 100%; background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); transition: background 0.3s; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        h1 { margin: 0; font-size: 1.5rem; }
+
+        .filter-btn { background: #e0e7ff; color: #3730a3; border: none; padding: 8px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .filter-btn.active { background: #4f46e5; color: #fff; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { padding: var(--cell-padding); text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; transition: padding 0.2s; }
+        th { background: var(--subtle-bg); font-size: 0.85rem; color: #888; text-transform: uppercase; }
+
+        .actions-cell { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 22px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #22c55e; }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        .delete-btn { background: none; border: none; color: var(--danger); cursor: pointer; padding: 4px; border-radius: 4px; font-size: 1.1rem; line-height: 1; transition: 0.2s; }
+        .delete-btn:hover { background-color: rgba(239, 68, 68, 0.1); }
+
+        .beta-box { margin-bottom: 24px; padding: 15px; background: #e0e7ff; color: #3730a3; border-radius: 8px; display: none; }
+
+        .card { background: var(--subtle-bg); padding: 20px; border-radius: 8px; border: 1px solid var(--border); }
+        .card h2 { font-size: 1.1rem; margin-top: 0; margin-bottom: 16px; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; font-size: 0.85rem; margin-bottom: 4px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; background: var(--card-bg); color: var(--text); }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
+        .submit-btn { width: 100%; background: #4f46e5; color: white; border: none; padding: 10px; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
+        .submit-btn:hover { background: #4338ca; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Feature Flag Manager</h1>
+        <button id="filterBtn" class="filter-btn" onclick="toggleFilter()">Show Only Enabled</button>
+    </div>
+
+    <div id="betaFeature" class="beta-box">
+        🚀 <strong>Beta Feature Active:</strong> Live checkout banner preview enabled!
+    </div>
+
+    <table>
+        <thead>
+        <tr>
+            <th>Flag Name</th>
+            <th style="text-align: right;">Actions</th>
+        </tr>
+        </thead>
+        <tbody id="flagTable"></tbody>
+    </table>
+
+    <div class="card">
+        <h2>Add New Flag</h2>
+        <form id="flagForm" onsubmit="saveFlag(event)">
+            <div class="form-group">
+                <label for="name">Flag Name</label>
+                <input type="text" id="name" required placeholder="e.g. new-feature">
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="enabled">
+                <label for="enabled" style="margin:0">Enabled</label>
+            </div>
+            <button type="submit" class="submit-btn">Save Flag</button>
+        </form>
+    </div>
+</div>
+
+<script>
+    let showOnlyEnabled = false;
+
+    async function loadFlags() {
+        const res = await fetch('/api/flags');
+        const flags = await res.json();
+        renderFlags(flags);
+    }
+
+    function renderFlags(flags) {
+        const table = document.getElementById('flagTable');
+        table.innerHTML = '';
+
+        flags.forEach(flag => applyFlagEffect(flag.name, flag.enabled));
+
+        flags
+            .filter(flag => !showOnlyEnabled || flag.enabled)
+            .forEach(flag => {
+                table.innerHTML += `
+                        <tr>
+                            <td><strong>${flag.name}</strong></td>
+                            <td class="actions-cell">
+                                <label class="switch">
+                                    <input type="checkbox" ${flag.enabled ? 'checked' : ''} onchange="toggleFlag('${flag.name}', this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                                <button class="delete-btn" onclick="deleteFlag('${flag.name}')" title="Remove Flag">
+                                    🗑
+                                </button>
+                            </td>
+                        </tr>`;
+            });
+    }
+
+    function applyFlagEffect(name, enabled) {
+        if (name === 'dark-mode') {
+            document.body.classList.toggle('dark-theme', enabled);
+        }
+        if (name === 'compact-view') {
+            document.body.classList.toggle('compact-mode', enabled);
+        }
+        if (name === 'beta-checkout') {
+            document.getElementById('betaFeature').style.display = enabled ? 'block' : 'none';
+        }
+    }
+
+    async function toggleFlag(name, enabled) {
+        await fetch('/api/flags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, enabled })
+        });
+        loadFlags();
+    }
+
+    async function deleteFlag(name) {
+        if(!confirm(`Are you sure you want to remove '${name}'?`)) return;
+
+        await fetch(`/api/flags/${name}`, { method: 'DELETE' });
+        loadFlags();
+    }
+
+    function toggleFilter() {
+        showOnlyEnabled = !showOnlyEnabled;
+        const btn = document.getElementById('filterBtn');
+        btn.classList.toggle('active', showOnlyEnabled);
+        btn.textContent = showOnlyEnabled ? 'Showing Enabled Only' : 'Show Only Enabled';
+        loadFlags();
+    }
+
+    async function saveFlag(e) {
+        e.preventDefault();
+        const name = document.getElementById('name').value;
+        const enabled = document.getElementById('enabled').checked;
+
+        await fetch('/api/flags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, enabled })
+        });
+
+        document.getElementById('flagForm').reset();
+        loadFlags();
+    }
+
+    const eventSource = new EventSource('/api/flags/stream');
+    eventSource.onmessage = (event) => {
+        const flag = JSON.parse(event.data);
+        applyFlagEffect(flag.name, flag.enabled);
+    };
+
+    loadFlags();
+</script>
+</body>
+</html>
