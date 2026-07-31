@@ -1,0 +1,3 @@
+@echo off
+echo Starting Feature Flag Manager...
+call mvnw.cmd spring-boot:run
